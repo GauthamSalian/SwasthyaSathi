@@ -1,7 +1,7 @@
 import os
 from pydantic import BaseModel
 from typing import List
-from fastapi import FastAPI, APIRouter
+from fastapi import APIRouter
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 
