@@ -11,10 +11,12 @@ router = APIRouter()
 class LocationInput(BaseModel):
     lat: float
     lon: float
+    radius: int
 
 class Hospitals(BaseModel):
     list_of_hospitals:list
 
+#defning endpoint to get nearby hospitals
 @router.post("/nearby_hospitals", response_model=Hospitals)
 async def get_nearby_hospitals(Location: LocationInput):
     url = "https://atlas.microsoft.com/search/poi/json"
@@ -23,7 +25,7 @@ async def get_nearby_hospitals(Location: LocationInput):
         "query": "hospital",
         "lat": Location.lat,
         "lon": Location.lon,
-        "radius": 15000,
+        "radius": Location.radius,
         "api-version": "1.0"
     }
     response = requests.get(url, params=params)
