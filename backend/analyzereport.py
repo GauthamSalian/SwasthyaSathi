@@ -29,7 +29,6 @@ async def analyze_report(
    
    #read the uploaded file
    contents = await file.read()
-   print(contents)
    
    #analyze the document
    poller = document_intelligence_client.begin_analyze_document(
