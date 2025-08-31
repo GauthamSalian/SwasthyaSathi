@@ -3,9 +3,11 @@ from chatbot import router as chatbot_router
 from locater import router as locater_router
 from analyzereport import router as analyzereport_router
 from insurance import router as insurance_router
+from userauth import router as userauth_router
 
 app = FastAPI()
 app.include_router(chatbot_router)
 app.include_router(locater_router)
 app.include_router(analyzereport_router)
 app.include_router(insurance_router)
+app.include_router(userauth_router)
