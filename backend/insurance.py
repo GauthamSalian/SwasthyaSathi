@@ -1,7 +1,11 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional, List
+from dotenv import load_dotenv
+import os
+from azure.cosmos import CosmosClient
 import pandas as pd
+load_dotenv()
 
 router = APIRouter()
 
@@ -27,82 +31,81 @@ class InsuranceRequest(BaseModel):
 class InsuranceResponse(BaseModel):
     suggested_plans: List[dict]
 
+endpoint = os.getenv("AZURE_COSMOS_ENDPOINT")
+key = os.getenv("AZURE_COSMOS_KEY")
+client = CosmosClient(endpoint, key)
+database = client.get_database_client("SwasthyaSathiDB")
+container= database.get_container_client("InsurancePlan")
+
 @router.post("/get_insurance_suggestions", response_model=InsuranceResponse)
 async def get_insurance_suggestions(request: InsuranceRequest):
-    # Load CSV
-    df = pd.read_csv("schemes.csv")
+    # Step 1: Fetch all plans
+    items = list(container.read_all_items())
 
-    # Age filter
-    df = df[
-        (df["min_age"] <= request.age) &
-        ((df["max_age"].isna()) | (df["max_age"] >= request.age))
-    ]
+    # Step 2: Filter using if conditions
+    filtered = []
+    for plan in items:
+        if int(plan["min_age"]) > request.age:
+            continue
+        if "max_age" in plan and plan["max_age"] and int(plan["max_age"]) < request.age:
+            continue
+        if plan["gender_eligibility"].lower() not in ["all", request.gender.lower()]:
+            continue
+        if plan["marital_status_required"].lower() not in ["optional", request.marital_status.lower()]:
+            continue
+        if plan["pregnancy_required"].lower() not in ["optional", (request.pregnancy_status or "").lower()]:
+            continue
+        if plan["pregnancy_covered"].lower() not in ["optional", (request.pregnancy_needs or "").lower()]:
+            continue
+        if int(plan["no_of_family_max"]) < request.no_of_family:
+            continue
+        if plan["dependents_allowed"].lower() not in ["yes", "optional", (request.dependents_allowed or "").lower()]:
+            continue
+        if plan["occupation_type"].lower() not in ["all", request.occupation_type.lower()]:
+            continue
+        if plan["ration_card_required"].lower() == "yes" and not request.ration_card:
+            continue
+        if not (
+            plan["state_coverage"].lower() == "all india" or
+            request.state.lower() in plan["state_coverage"].lower()
+        ):
+            continue
+        # Health conditions
+        covered = [c.strip().lower() for c in plan["health_conditions_covered"].split(",")]
+        if not any(cond.lower() in covered for cond in request.health_conditions or []):
+            continue
 
-    # Gender filter
-    df = df[
-        (df["gender_eligibility"].str.lower() == request.gender.lower()) |
-        (df["gender_eligibility"].str.lower() == "all")
-    ]
+        # Add matched plan
+        filtered.append({
+            "scheme_name": plan["scheme_name"],
+            "base_sum_insured_range": plan["base_sum_insured_range"],
+            "premium_start": plan["premium_start"],
+            "claim_process_notes": plan["claim_process_notes"],
+            "tags": plan["tags"]
+        })
 
-    # Marital status
-    df = df[
-        (df["marital_status_required"].str.lower() == request.marital_status.lower()) |
-        (df["marital_status_required"].str.lower() == "optional")
-    ]
+    return InsuranceResponse(suggested_plans=filtered)
 
-    # Pregnancy filters
-    df = df[
-        (df["pregnancy_required"].str.lower() == (request.pregnancy_status or "").lower()) |
-        (df["pregnancy_required"].str.lower() == "optional")
-    ]
-    df = df[
-        (df["pregnancy_covered"].str.lower() == (request.pregnancy_needs or "").lower()) |
-        (df["pregnancy_covered"].str.lower() == "optional")
-    ]
 
-    # Family size
-    df = df[df["no_of_family_max"] >= request.no_of_family]
-
-    # Dependents
-    df = df[
-        (df["dependents_allowed"].str.lower() == (request.dependents_allowed or "").lower()) |
-        (df["dependents_allowed"].str.lower() == "yes") |
-        (df["dependents_allowed"].str.lower() == "optional")
-    ]
-
-    # Occupation
-    df = df[
-        (df["occupation_type"].str.lower() == request.occupation_type.lower()) |
-        (df["occupation_type"].str.lower() == "all")
-    ]
-
-    # Ration card
-    df = df[
-        (df["ration_card_required"].str.lower() == "no") |
-        (request.ration_card is not None)
-    ]
-
-    # State coverage
-    df = df[
-        (df["state_coverage"].str.lower() == "all india") |
-        (df["state_coverage"].str.contains(request.state, case=False, na=False))
-    ]
-
-    # Health conditions
-    df["covered_conditions"] = df["health_conditions_covered"].str.lower().str.split(",")
-    df = df[
-        df["covered_conditions"].apply(
-            lambda conds: any(c.lower() in conds for c in request.health_conditions or [])
-        )
-    ]
-
-    # Final output
-    final_df = df[[
-        "scheme_name",
-        "base_sum_insured_range",
-        "premium_start",
-        "claim_process_notes",
-        "tags"
-    ]].to_dict(orient="records")
-
-    return InsuranceResponse(suggested_plans=final_df)
+"""
+Sample Request Body:
+{
+  "age": 32,
+  "gender": "female",
+  "marital_status": "married",
+  "pregnancy_status": "yes",
+  "pregnancy_needs": "yes",
+  "no_of_family": 4,
+  "dependents_allowed": "yes",
+  "occupation_type": "agriculture",
+  "annual_income": 180000,
+  "ration_card": "yes",
+  "state": "Karnataka",
+  "district": "Udupi",
+  "health_conditions": ["diabetes", "hypertension"],
+  "disability": "no",
+  "language": "kannada",
+  "literacy_level": "basic",
+  "digital_literacy": "low"
+}
+"""
